@@ -401,6 +401,7 @@ if st.sidebar.button("Run Full Analysis"):
         stock_data = preprocess_stock_data(stock_data)
 
         combined_df = combine_data(result_df, stock_data)
+        
         correlation_pct_change = calculate_correlation(combined_df)
 
         st.write(f"Correlation: {correlation_pct_change}")
