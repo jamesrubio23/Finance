@@ -2,6 +2,9 @@
 ##LIBRARIES##
 #############
 
+import re
+import math
+
 import yfinance as yf
 from finvizfinance.quote import finvizfinance
 
@@ -26,40 +29,55 @@ def classify_sentiment(title):
 
 
 
-def classify_sentiment_batch(titles):
-    print(f"🔹 Clasificando {len(titles)} títulos de noticias.")
+def classify_sentiment_batch(titles, batch_size = 10):
+    print(f"Clasificando {len(titles)} títulos de noticias.")
 
-    prompt = (
-        "For each news title below, classify the sentiment as 'POSITIVE', 'NEGATIVE' or 'NEUTRAL'.\n"
-        "Return exactly one sentiment per title, in the same order as the titles, and NOTHING ELSE.\n"
-        "Make sure to return exactly the same number of lines as the number of news titles.\n"
-    )
-
-    prompt += "\n".join(f"- {title}" for title in titles)
-
-    output = llm.invoke(prompt)
-    print(f"🔹 Respuesta de Ollama:\n{output}\n")
 
     valid_sentiments = {"POSITIVE", "NEGATIVE", "NEUTRAL"}
-    sentiments = []
+    sentiments = ["NEUTRAL"] * len(titles)
 
-    for line in output.split("\n"):
-        print("Otro")
-        line = line.strip().upper()
+    num_batches = math.ceil(len(titles)/batch_size)
 
-        sentiment = next((s for s in valid_sentiments if s in line), None)
+    for i in range(num_batches):
+        print(f"Batch {i}")
+        batch_titles = titles[i * batch_size:(i + 1) * batch_size]
 
-        if sentiment:
-            sentiments.append(sentiment)
-        else:
-            sentiments.append('NEUTRAL') 
+        prompt = (
+            "For each news title below, classify the sentiment as 'POSITIVE', 'NEGATIVE' or 'NEUTRAL'.\n"
+            "Return exactly one sentiment per title, and a number with the order of the titles in the same order as the titles, and NOTHING ELSE.\n"
+            "The answer can only contain a number with the order of the title and the words POSITIVE, NEGATIVE or NEUTRAL.\n"
+            "Example:\n"
+            "1 - POSITIVE\n"
+            "2 - NEGATIVE\n"
+            "3 - NEUTRAL\n"
+        )
+
+        prompt += "\n".join(f"{idx+1} - {title}" for idx, title in enumerate(batch_titles))
+
+        output = llm.invoke(prompt)
+        print(f"🔹 Respuesta de Ollama para el batch {i + 1}/{num_batches}:\n{output}\n")
+
+        for line in output.split("\n"):
+            line = line.strip().upper()
+            match = re.match(r"(\d+)\s*-\s*(POSITIVE|NEGATIVE|NEUTRAL)", line)
+            
+            if match:
+                index = int(match.group(1)) - 1 + (i * batch_size)  # Convertir a índice global
+                sentiment = match.group(2)
+                
+                if 0 <= index < len(sentiments):  # Verificar que el índice sea válido
+                    sentiments[index] = sentiment
 
 
         
-        while len(sentiments) < len(titles):
-            sentiments.append("NEUTRAL")
+    while len(sentiments) < len(titles):
+        sentiments.append("NEUTRAL")
+        
+    if len(sentiments) > len(titles):
+        sentiments = sentiments[:len(titles)]
+
     print(f"La longitud de los sentiments es {len(sentiments)}")
-    print(sentiments)
+    print(f"Classification completed!:\n{sentiments}")
     return sentiments
 
 
@@ -148,11 +166,21 @@ def trading_day(stock_data, result_df):
     return result_df
 
 
+def preprocess_stock_data(stock_data):
+    stock_data.columns = stock_data.columns.droplevel(1)
+
+    stock_data.columns.name = None
+
+    stock_data.index.name = None
+
+    return stock_data
+
+
 
 
 # Function to combine sentiment and stock data
 def combine_data(result_df, stock_data):
-    combined_df = result_df.set_index('DateOnly').join(stock_data[['Pct_Change']], how='inner')
+    combined_df = result_df.set_index('Trading_Day').join(stock_data[['Pct_Change']], how='inner')
     combined_df['lagged_7day_pct_positive'] = combined_df['7day_pct_positive'].shift(1)  # Lag sentiment feature
 
     return combined_df
@@ -198,8 +226,8 @@ def get_future_dates_next_day(combined_df, num_days):
 
 
 
+#Function that takes the dataframe with the data from the news and predicts the percentage change for the next days
 def fit_and_forecast(combined_df, function_future_dates=get_future_dates ,forecast_steps=3):
-    print("A predecir")
     endog = combined_df['Pct_Change'].dropna() 
     exog = combined_df['lagged_7day_pct_positive'].dropna() 
     print("GOING FOR THE ARIMAX MODEL")
@@ -293,7 +321,7 @@ def create_plot(combined_df, forecast_mean, forecast_ci, forecast_index):
         x=combined_df.index,
         y=pct_change_std,
         name='Stock Pct Change (Standardized)',
-        line=dict(color='yellow'),
+        line=dict(color='orange'),
         mode='lines+markers'
     ))
 
@@ -318,17 +346,24 @@ def create_plot(combined_df, forecast_mean, forecast_ci, forecast_index):
 
     fig.update_layout(
         title='Sentiment Proportion and Stock Percentage Change with Forecast',
-        xaxis_title='Date',
+        xaxis = dict(
+            title='Date',
+            tickmode='linear',
+            dtick=86400000.0,
+            tickangle=90,
+            showgrid=True
+        ),
         yaxis=dict(
-            title=dict(text='Standardized Sentiment Proportion', font=dict(color='yellow'))
+            title=dict(text='Standardized Sentiment Proportion', font=dict(color='orange'))
         ),
         yaxis2=dict(
-            title=dict(text='Stock Pct Change', font=dict(color='yellow')),
+            title=dict(text='Stock Pct Change', font=dict(color='orange')),
             overlaying='y',
             side='right'
         ),
         template='plotly_dark'
     )
+
 
 
     st.plotly_chart(fig)
@@ -346,7 +381,7 @@ if st.sidebar.button("Get News Sentiment Data"):
 
     st.session_state["news_df"] = news_df
 
-    st.write("✅ News Sentiment Data obtained successfully!")
+    st.write("News Sentiment Data obtained successfully!")
     st.write(news_df.head())
 
 if st.sidebar.button("Run Full Analysis"):
@@ -362,6 +397,8 @@ if st.sidebar.button("Run Full Analysis"):
         news_df = trading_day(stock_data, news_df)
 
         result_df = process_sentiment_data(news_df)
+
+        stock_data = preprocess_stock_data(stock_data)
 
         combined_df = combine_data(result_df, stock_data)
         correlation_pct_change = calculate_correlation(combined_df)
