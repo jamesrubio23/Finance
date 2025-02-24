@@ -16,21 +16,26 @@ import numpy as np
 
 import holidays
 
-from langchain_community.llms import Ollama
+from langchain_community.llms import Ollama #To run locally
 
+from transformers import pipeline # To run with the deployment
 
 import streamlit as st
 
+
+
+###############################
+####FFUNCTION TO RUN LOCALLY###
+###############################
+
 llm = Ollama(model='llama3')
 
-def classify_sentiment(title):
-    output = llm.invoke(f"Classify the sentiment as 'POSITIVE' or 'NEGATIVE' or 'NEUTRAL' with just that one")
-    return output.strip()
-
-
-
+### For the local model we will use Ollama3 but to deploy it on streamlit, a transformer from HuggingFace will be used.
 def classify_sentiment_batch(titles, batch_size = 10):
-    print(f"Clasificando {len(titles)} títulos de noticias.")
+    """
+    Function to run the code locally!
+    """
+    print(f"Classyfying {len(titles)} news.")
 
 
     valid_sentiments = {"POSITIVE", "NEGATIVE", "NEUTRAL"}
@@ -55,17 +60,17 @@ def classify_sentiment_batch(titles, batch_size = 10):
         prompt += "\n".join(f"{idx+1} - {title}" for idx, title in enumerate(batch_titles))
 
         output = llm.invoke(prompt)
-        print(f"🔹 Respuesta de Ollama para el batch {i + 1}/{num_batches}:\n{output}\n")
+        print(f"Ollama's answer for the batch {i + 1}/{num_batches}:\n{output}\n")
 
         for line in output.split("\n"):
             line = line.strip().upper()
             match = re.match(r"(\d+)\s*-\s*(POSITIVE|NEGATIVE|NEUTRAL)", line)
             
             if match:
-                index = int(match.group(1)) - 1 + (i * batch_size)  # Convertir a índice global
+                index = int(match.group(1)) - 1 + (i * batch_size) 
                 sentiment = match.group(2)
                 
-                if 0 <= index < len(sentiments):  # Verificar que el índice sea válido
+                if 0 <= index < len(sentiments): 
                     sentiments[index] = sentiment
 
 
@@ -76,11 +81,55 @@ def classify_sentiment_batch(titles, batch_size = 10):
     if len(sentiments) > len(titles):
         sentiments = sentiments[:len(titles)]
 
-    print(f"La longitud de los sentiments es {len(sentiments)}")
+    print(f"Sentiments length is {len(sentiments)}")
     print(f"Classification completed!:\n{sentiments}")
     return sentiments
 
 
+
+
+###################################
+###FUNCTIONS TO RUN IN STREAMLIT###
+###################################
+
+def classify_sentiment(title, neutral_threshold=0.7):
+    result = classifier(title)
+    sentiment = result[0]['label']
+    score = result[0]['score']
+
+    if score < neutral_threshold:
+        return "NEUTRAL"
+    elif sentiment == "POSITIVE":
+        return "POSITIVE"
+    else:
+        return "NEGATIVE"
+
+def classify_sentiment_batch(titles, neutral_threshold=0.7):
+    print(f"Classifying {len(titles)} with transformer.")
+
+    results = classifier(titles)
+
+    sentiments = []
+    for result in results:
+        sentiment = result['label']
+        score = result['score']
+
+        if score < neutral_threshold:
+            sentiments.append("NEUTRAL")
+        elif sentiment == "POSITIVE":
+            sentiments.append("POSITIVE")
+        else:
+            sentiments.append("NEGATIVE")
+
+    print(f"Classification completed:\n{sentiments}")
+    return sentiments
+
+
+###########################
+###REST OF THE FUNCITONS###
+###########################
+
+#Function that downloads the news in a Dataframe
 def get_news_ticker(ticker):
     stock = finvizfinance(ticker)
     news_df = stock.ticker_news()
@@ -159,13 +208,14 @@ def next_trading_day(stock_dates, news_date):
     
     return stock_dates[pos]
 
+# Funciton that determines if market is opened
 def trading_day(stock_data, result_df):
     stock_dates = np.array(stock_data.index)
 
     result_df['Trading_Day'] = result_df['DateOnly'].apply(lambda date: next_trading_day(stock_dates, date))
     return result_df
 
-
+# Funciton that eliminates the multiindex form stock_data
 def preprocess_stock_data(stock_data):
     stock_data.columns = stock_data.columns.droplevel(1)
 
@@ -259,7 +309,7 @@ def fit_and_forecast(combined_df, function_future_dates=get_future_dates ,foreca
     return forecast_mean, forecast_ci, future_dates
 
 
-
+# Function that standarizes and prepares the variables to be inserted in the prediction model
 def preprocessing_data(combined_df):
 
     last_real_date = combined_df.dropna(subset=['Pct_Change']).index[-1]
@@ -377,6 +427,12 @@ ticker = st.sidebar.text_input("Enter stock ticker. For instance choose SBUX:", 
 
 if st.sidebar.button("Get News Sentiment Data"):
     news_df_original = get_news_ticker(ticker)
+
+    st.write("Downloading the classificator")
+    classifier = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+
+    st.write("Classificator downloaded")
+
     news_df = get_news_data(news_df_original)
 
     st.session_state["news_df"] = news_df
