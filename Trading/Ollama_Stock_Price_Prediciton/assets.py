@@ -16,7 +16,7 @@ import numpy as np
 
 import holidays
 
-from langchain_community.llms import Ollama #To run locally
+#from langchain_community.llms import Ollama #To run locally
 
 from transformers import pipeline # To run with the deployment
 
