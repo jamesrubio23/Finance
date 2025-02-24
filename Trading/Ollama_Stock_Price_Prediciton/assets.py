@@ -27,14 +27,12 @@ import streamlit as st
 ###############################
 ####FFUNCTION TO RUN LOCALLY###
 ###############################
-
+"""
 llm = Ollama(model='llama3')
 
 ### For the local model we will use Ollama3 but to deploy it on streamlit, a transformer from HuggingFace will be used.
 def classify_sentiment_batch(titles, batch_size = 10):
-    """
-    Function to run the code locally!
-    """
+
     print(f"Classyfying {len(titles)} news.")
 
 
@@ -85,7 +83,7 @@ def classify_sentiment_batch(titles, batch_size = 10):
     print(f"Classification completed!:\n{sentiments}")
     return sentiments
 
-
+"""
 
 
 ###################################
